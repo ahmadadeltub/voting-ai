@@ -1,0 +1,287 @@
+import tkinter as tk
+from tkinter import font
+import cv2
+from PIL import Image, ImageTk, ImageDraw
+import mediapipe as mp
+import time
+
+# ----------------------------- Helper Functions -----------------------------
+def add_rounded_border(image, border=10, radius=30):
+    """Add a white rounded border around a PIL image."""
+    mask = Image.new("L", image.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle((0, 0, image.size[0], image.size[1]), radius=radius, fill=255)
+    new_size = (image.size[0] + 2 * border, image.size[1] + 2 * border)
+    background = Image.new("RGB", new_size, "white")
+    background.paste(image, (border, border), mask)
+    return background
+
+def are_other_fingers_folded(landmarks):
+    """
+    Check if index, middle, ring, and pinky are folded.
+    (A finger is considered folded if its tip is below its corresponding MCP landmark.)
+    """
+    return (landmarks[8][1] > landmarks[5][1] and
+            landmarks[12][1] > landmarks[9][1] and
+            landmarks[16][1] > landmarks[13][1] and
+            landmarks[20][1] > landmarks[17][1])
+
+def detect_gesture(landmarks):
+    """
+    Determine gesture based on landmarks.
+    Returns "Thumbs Up" if the thumb tip (4) is above the thumb IP (3)
+    and other fingers are folded.
+    Returns "Thumbs Down" if the thumb tip is below the thumb IP and other fingers are folded.
+    Otherwise, returns None.
+    """
+    if not are_other_fingers_folded(landmarks):
+        return None
+    if landmarks[4][1] < landmarks[3][1]:
+        return "Thumbs Up"
+    elif landmarks[4][1] > landmarks[3][1]:
+        return "Thumbs Down"
+    else:
+        return None
+
+# --------------------------- Mediapipe Setup ---------------------------
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(
+    max_num_hands=1,
+    min_detection_confidence=0.6,  # lowered for speed
+    min_tracking_confidence=0.6)   # lowered for speed
+mp_draw = mp.solutions.drawing_utils
+
+# Custom drawing specs: thick green lines.
+landmark_drawing_spec = mp_draw.DrawingSpec(color=(0, 255, 0), thickness=5, circle_radius=5)
+connection_drawing_spec = mp_draw.DrawingSpec(color=(0, 255, 0), thickness=5)
+
+# --------------------------- Global Variables ---------------------------
+like_count = 0
+dislike_count = 0
+last_vote_time = 0          # Timestamp of the last vote
+voted = False               # Indicates if a vote is registered (cooldown active)
+cooldown_until = 0          # Time until which no new vote is allowed
+last_hand_seen = 0          # Timestamp when a hand was last detected
+
+# For stability checking:
+stable_gesture = None       # The gesture that is currently stable
+gesture_start_time = 0      # When the stable gesture was first detected
+STABLE_THRESHOLD = 0.1      # Gesture must be continuously detected for 0.1 seconds
+
+# --------------------------- GUI Functions ---------------------------
+def clear_vote_message():
+    vote_message_label.config(text="")
+
+def update_cooldown_timer():
+    """Update the cooldown countdown label with bold, large text."""
+    remaining = int(cooldown_until - time.time())
+    if remaining > 0:
+        cooldown_label.config(text=f"Next vote in: {remaining} seconds")
+    else:
+        cooldown_label.config(text="")
+    root.after(200, update_cooldown_timer)
+
+# --------------------------- Main Frame Update ---------------------------
+def update_frame():
+    global last_vote_time, like_count, dislike_count, voted, cooldown_until, last_hand_seen
+    global stable_gesture, gesture_start_time
+
+    ret, frame = cap.read()
+    if ret:
+        # Mirror the camera view.
+        frame = cv2.flip(frame, 1)
+        processed_frame = frame.copy()
+        current_time = time.time()
+        hand_detected = False
+        detected_gesture = None
+
+        # Convert frame to RGB for Mediapipe processing.
+        rgb_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+        results = hands.process(rgb_frame)
+
+        if results.multi_hand_landmarks:
+            hand_detected = True
+            last_hand_seen = current_time
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_draw.draw_landmarks(processed_frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                                       landmark_drawing_spec, connection_drawing_spec)
+                h, w, _ = processed_frame.shape
+                landmarks = [(int(lm.x * w), int(lm.y * h)) for lm in hand_landmarks.landmark]
+                detected_gesture = detect_gesture(landmarks)
+                break
+
+        # Automatically reset the "voted" flag if cooldown has passed.
+        if current_time >= cooldown_until:
+            voted = False
+
+        # If no hand is detected for at least 1 second, reset stability.
+        if not hand_detected and (current_time - last_hand_seen) >= 1:
+            stable_gesture = None
+            gesture_start_time = 0
+            voted = False
+
+        # Stability check: require the same gesture be detected for STABLE_THRESHOLD seconds.
+        if detected_gesture is not None:
+            if detected_gesture == stable_gesture:
+                if current_time - gesture_start_time >= STABLE_THRESHOLD:
+                    if not voted and current_time >= cooldown_until and (current_time - last_vote_time >= 2):
+                        if stable_gesture == "Thumbs Up":
+                            like_count += 1
+                            like_counter_label.config(text=f"Likes: {like_count}")
+                        elif stable_gesture == "Thumbs Down":
+                            dislike_count -= 1
+                            dislike_counter_label.config(text=f"Dislikes: {dislike_count}")
+                        last_vote_time = current_time
+                        voted = True
+                        cooldown_until = current_time + 5  # 5-second cooldown
+                        vote_message_label.config(text="Thank you for your voting")
+                        root.after(2000, clear_vote_message)
+                        stable_gesture = None
+                        gesture_start_time = 0
+            else:
+                stable_gesture = detected_gesture
+                gesture_start_time = current_time
+        else:
+            stable_gesture = None
+            gesture_start_time = 0
+
+        # Upscale the processed frame to 600x600 for display.
+        display_frame = cv2.resize(processed_frame, (600, 600))
+        display_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(display_frame)
+        img = add_rounded_border(img, border=10, radius=30)
+        imgtk = ImageTk.PhotoImage(image=img)
+        label_img.imgtk = imgtk
+        label_img.configure(image=imgtk)
+
+    root.after(10, update_frame)
+
+# --------------------------- Manual Voting Handlers ---------------------------
+def like_clicked(event):
+    global like_count, last_vote_time, voted, cooldown_until, stable_gesture, gesture_start_time
+    if not voted and time.time() >= cooldown_until and (time.time() - last_vote_time >= 2):
+        like_count += 1
+        like_counter_label.config(text=f"Likes: {like_count}")
+        last_vote_time = time.time()
+        voted = True
+        cooldown_until = time.time() + 5
+        vote_message_label.config(text="Thank you for your voting")
+        root.after(2000, clear_vote_message)
+        stable_gesture = None
+        gesture_start_time = 0
+
+def dislike_clicked(event):
+    global dislike_count, last_vote_time, voted, cooldown_until, stable_gesture, gesture_start_time
+    if not voted and time.time() >= cooldown_until and (time.time() - last_vote_time >= 2):
+        dislike_count -= 1
+        dislike_counter_label.config(text=f"Dislikes: {dislike_count}")
+        last_vote_time = time.time()
+        voted = True
+        cooldown_until = time.time() + 5
+        vote_message_label.config(text="Thank you for your voting")
+        root.after(2000, clear_vote_message)
+        stable_gesture = None
+        gesture_start_time = 0
+
+# --------------------------- GUI Setup ---------------------------
+root = tk.Tk()
+root.title("Voting GUI")
+root.configure(bg="#00008B")
+
+# Create the top header frame for logos and the question.
+top_frame = tk.Frame(root, bg="#00008B")
+top_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
+
+# Load left header logo (qstssw.png).
+try:
+    left_logo_image = Image.open("qstssw.png")
+    left_logo_image = left_logo_image.resize((100, 100), Image.Resampling.LANCZOS)
+    left_logo_photo = ImageTk.PhotoImage(left_logo_image)
+except Exception as e:
+    print("Error loading qstssw.png:", e)
+    left_logo_photo = None
+
+# Load right header logo (moew.png).
+try:
+    right_logo_image = Image.open("moew.png")
+    right_logo_image = right_logo_image.resize((100, 100), Image.Resampling.LANCZOS)
+    right_logo_photo = ImageTk.PhotoImage(right_logo_image)
+except Exception as e:
+    print("Error loading moew.png:", e)
+    right_logo_photo = None
+
+# Place the left logo, question, and right logo in the top frame.
+if left_logo_photo:
+    left_logo_label = tk.Label(top_frame, image=left_logo_photo, bg="#00008B")
+    left_logo_label.grid(row=0, column=0, padx=10)
+else:
+    left_logo_label = tk.Label(top_frame, text="Logo", font=("Helvetica", 16, "bold"), bg="#00008B", fg="white")
+    left_logo_label.grid(row=0, column=0, padx=10)
+
+# Create the question label.
+question_text = ("What is your evaluation of the internal scientific research exhibition "
+                 "for 2024-2025?")
+question_label = tk.Label(top_frame, text=question_text, font=("Helvetica", 30, "bold"), fg="white", bg="#00008B", wraplength=600)
+question_label.grid(row=0, column=1, padx=10)
+
+if right_logo_photo:
+    right_logo_label = tk.Label(top_frame, image=right_logo_photo, bg="#00008B")
+    right_logo_label.grid(row=0, column=2, padx=10)
+else:
+    right_logo_label = tk.Label(top_frame, text="Logo", font=("Helvetica", 16, "bold"), bg="#00008B", fg="white")
+    right_logo_label.grid(row=0, column=2, padx=10)
+
+# Create the rest of the GUI (below the top header).
+# Frame for the voting logos and counters.
+logo_frame = tk.Frame(root, bg="#00008B")
+logo_frame.pack(pady=10)
+
+# Load the combined voting logo (like.png, left half: like; right half: dislike).
+try:
+    combined_image = Image.open("like.png")
+except Exception as e:
+    print("Error loading like.png:", e)
+    exit(1)
+
+img_width, img_height = combined_image.size
+half_width = img_width // 2
+
+like_image = combined_image.crop((0, 0, half_width, img_height)).resize((100, 100), Image.Resampling.LANCZOS)
+dislike_image = combined_image.crop((half_width, 0, img_width, img_height)).resize((100, 100), Image.Resampling.LANCZOS)
+
+like_photo = ImageTk.PhotoImage(like_image)
+dislike_photo = ImageTk.PhotoImage(dislike_image)
+
+like_logo_label = tk.Label(logo_frame, image=like_photo, bg="#00008B")
+like_logo_label.grid(row=0, column=0, padx=20)
+dislike_logo_label = tk.Label(logo_frame, image=dislike_photo, bg="#00008B")
+dislike_logo_label.grid(row=0, column=1, padx=20)
+
+like_logo_label.bind("<Button-1>", like_clicked)
+dislike_logo_label.bind("<Button-1>", dislike_clicked)
+
+like_counter_label = tk.Label(logo_frame, text=f"Likes: {like_count}", font=("Helvetica", 20, "bold"), fg="white", bg="#00008B")
+like_counter_label.grid(row=1, column=0, pady=5)
+dislike_counter_label = tk.Label(logo_frame, text=f"Dislikes: {dislike_count}", font=("Helvetica", 20, "bold"), fg="white", bg="#00008B")
+dislike_counter_label.grid(row=1, column=1, pady=5)
+
+vote_message_label = tk.Label(root, text="", font=("Helvetica", 24, "bold"), fg="white", bg="#00008B")
+vote_message_label.pack(pady=10)
+
+cooldown_label = tk.Label(root, text="", font=("Helvetica", 20, "bold"), fg="yellow", bg="#00008B")
+cooldown_label.pack(pady=5)
+
+label_img = tk.Label(root, bg="#00008B")
+label_img.pack(pady=10)
+
+# --------------------------- Video Capture ---------------------------
+cap = cv2.VideoCapture(0)
+# Set capture resolution to 320x320 for faster processing.
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 320)
+
+update_frame()
+update_cooldown_timer()
+
+root.mainloop()
+cap.release()
