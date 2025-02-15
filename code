@@ -135,7 +135,7 @@ def update_frame():
                         voted = True
                         cooldown_until = current_time + 5  # 5-second cooldown
                         vote_message_label.config(text="Thank you for your voting")
-                        root.after(2000, clear_vote_message)
+                        root.after(4000, clear_vote_message)
                         stable_gesture = None
                         gesture_start_time = 0
             else:
@@ -146,7 +146,7 @@ def update_frame():
             gesture_start_time = 0
 
         # Upscale the processed frame to 600x600 for display.
-        display_frame = cv2.resize(processed_frame, (600, 600))
+        display_frame = cv2.resize(processed_frame, (450, 450))
         display_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(display_frame)
         img = add_rounded_border(img, border=10, radius=30)
@@ -166,7 +166,7 @@ def like_clicked(event):
         voted = True
         cooldown_until = time.time() + 5
         vote_message_label.config(text="Thank you for your voting")
-        root.after(2000, clear_vote_message)
+        root.after(4000, clear_vote_message)
         stable_gesture = None
         gesture_start_time = 0
 
@@ -179,35 +179,35 @@ def dislike_clicked(event):
         voted = True
         cooldown_until = time.time() + 5
         vote_message_label.config(text="Thank you for your voting")
-        root.after(2000, clear_vote_message)
+        root.after(4000, clear_vote_message)
         stable_gesture = None
         gesture_start_time = 0
 
 # --------------------------- GUI Setup ---------------------------
 root = tk.Tk()
-root.title("Voting GUI")
+root.title("QSTSS Voting ")
 root.configure(bg="#00008B")
 
 # Create the top header frame for logos and the question.
 top_frame = tk.Frame(root, bg="#00008B")
 top_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
 
-# Load left header logo (qstssw.png).
+# Load left header logo (qstss.png).
 try:
-    left_logo_image = Image.open("qstssw.png")
-    left_logo_image = left_logo_image.resize((100, 100), Image.Resampling.LANCZOS)
+    left_logo_image = Image.open("qstss.png")
+    left_logo_image = left_logo_image.resize((220, 110), Image.Resampling.LANCZOS)
     left_logo_photo = ImageTk.PhotoImage(left_logo_image)
 except Exception as e:
-    print("Error loading qstssw.png:", e)
+    print("Error loading qstss.png:", e)
     left_logo_photo = None
 
-# Load right header logo (moew.png).
+# Load right header logo (moe.png).
 try:
-    right_logo_image = Image.open("moew.png")
-    right_logo_image = right_logo_image.resize((100, 100), Image.Resampling.LANCZOS)
+    right_logo_image = Image.open("moe.png")
+    right_logo_image = right_logo_image.resize((180, 90), Image.Resampling.LANCZOS)
     right_logo_photo = ImageTk.PhotoImage(right_logo_image)
 except Exception as e:
-    print("Error loading moew.png:", e)
+    print("Error loading moe.png:", e)
     right_logo_photo = None
 
 # Place the left logo, question, and right logo in the top frame.
@@ -221,8 +221,8 @@ else:
 # Create the question label.
 question_text = ("What is your evaluation of the internal scientific research exhibition "
                  "for 2024-2025?")
-question_label = tk.Label(top_frame, text=question_text, font=("Helvetica", 30, "bold"), fg="white", bg="#00008B", wraplength=600)
-question_label.grid(row=0, column=1, padx=10)
+question_label = tk.Label(top_frame, text=question_text, font=("Helvetica", 36, "bold"), fg="white", bg="#00008B", wraplength=2000)
+question_label.grid(row=3, column=1, padx=10)
 
 if right_logo_photo:
     right_logo_label = tk.Label(top_frame, image=right_logo_photo, bg="#00008B")
