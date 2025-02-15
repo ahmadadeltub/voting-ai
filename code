@@ -4,6 +4,10 @@ import cv2
 from PIL import Image, ImageTk, ImageDraw
 import mediapipe as mp
 import time
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # ----------------------------- Helper Functions -----------------------------
 def add_rounded_border(image, border=10, radius=30):
@@ -68,6 +72,21 @@ stable_gesture = None       # The gesture that is currently stable
 gesture_start_time = 0      # When the stable gesture was first detected
 STABLE_THRESHOLD = 0.1      # Gesture must be continuously detected for 0.1 seconds
 
+# --------------------------- Chart Setup ---------------------------
+fig = Figure(figsize=(6, 6), dpi=120)
+ax = fig.add_subplot(111)
+def update_chart():
+    """Update the bar chart with current vote counts and total persons voting."""
+    total_votes = like_count + dislike_count
+    ax.clear()
+    categories = ['Likes', 'Dislikes', 'Persons Voting']
+    votes = [like_count, dislike_count, total_votes]
+    colors = ['green', 'red', 'blue']
+    ax.bar(categories, votes, color=colors)
+    ax.set_ylim(0, max(votes) + 5)
+    ax.set_title("Voting Results")
+    canvas.draw()
+
 # --------------------------- GUI Functions ---------------------------
 def clear_vote_message():
     vote_message_label.config(text="")
@@ -129,13 +148,14 @@ def update_frame():
                             like_count += 1
                             like_counter_label.config(text=f"Likes: {like_count}")
                         elif stable_gesture == "Thumbs Down":
-                            dislike_count -= 1
+                            dislike_count += 1
                             dislike_counter_label.config(text=f"Dislikes: {dislike_count}")
                         last_vote_time = current_time
                         voted = True
                         cooldown_until = current_time + 5  # 5-second cooldown
                         vote_message_label.config(text="Thank you for your voting")
                         root.after(4000, clear_vote_message)
+                        update_chart()  # Update chart when a vote is registered.
                         stable_gesture = None
                         gesture_start_time = 0
             else:
@@ -145,7 +165,7 @@ def update_frame():
             stable_gesture = None
             gesture_start_time = 0
 
-        # Upscale the processed frame to 600x600 for display.
+        # Upscale the processed frame to 450x450 for display.
         display_frame = cv2.resize(processed_frame, (450, 450))
         display_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(display_frame)
@@ -169,11 +189,12 @@ def like_clicked(event):
         root.after(4000, clear_vote_message)
         stable_gesture = None
         gesture_start_time = 0
+        update_chart()
 
 def dislike_clicked(event):
     global dislike_count, last_vote_time, voted, cooldown_until, stable_gesture, gesture_start_time
     if not voted and time.time() >= cooldown_until and (time.time() - last_vote_time >= 2):
-        dislike_count -= 1
+        dislike_count += 1
         dislike_counter_label.config(text=f"Dislikes: {dislike_count}")
         last_vote_time = time.time()
         voted = True
@@ -182,6 +203,7 @@ def dislike_clicked(event):
         root.after(4000, clear_vote_message)
         stable_gesture = None
         gesture_start_time = 0
+        update_chart()
 
 # --------------------------- GUI Setup ---------------------------
 root = tk.Tk()
@@ -218,7 +240,6 @@ else:
     left_logo_label = tk.Label(top_frame, text="Logo", font=("Helvetica", 16, "bold"), bg="#00008B", fg="white")
     left_logo_label.grid(row=0, column=0, padx=10)
 
-# Create the question label.
 question_text = ("What is your evaluation of the internal scientific research exhibition "
                  "for 2024-2025?")
 question_label = tk.Label(top_frame, text=question_text, font=("Helvetica", 36, "bold"), fg="white", bg="#00008B", wraplength=2000)
@@ -231,10 +252,26 @@ else:
     right_logo_label = tk.Label(top_frame, text="Logo", font=("Helvetica", 16, "bold"), bg="#00008B", fg="white")
     right_logo_label.grid(row=0, column=2, padx=10)
 
-# Create the rest of the GUI (below the top header).
-# Frame for the voting logos and counters.
-logo_frame = tk.Frame(root, bg="#00008B")
-logo_frame.pack(pady=10)
+# Create a content frame to hold the chart and the camera display; arrange side by side.
+content_frame = tk.Frame(root, bg="#00008B")
+content_frame.pack(pady=10)
+
+# Create a frame for the chart on the left of the camera frame.
+chart_frame = tk.Frame(content_frame, bg="#00008B")
+chart_frame.pack(side=tk.LEFT, padx=10)
+
+# Create the Matplotlib canvas and add it to the chart frame.
+canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+canvas.draw()
+canvas.get_tk_widget().pack()
+
+# Create a frame for the camera display on the right of the chart.
+camera_frame = tk.Frame(content_frame, bg="#00008B")
+camera_frame.pack(side=tk.LEFT, padx=10)
+
+# Create a voting frame to hold the combined voting logo and counters; place at the top of the camera frame.
+voting_frame = tk.Frame(camera_frame, bg="#00008B")
+voting_frame.pack(pady=10)
 
 # Load the combined voting logo (like.png, left half: like; right half: dislike).
 try:
@@ -252,26 +289,27 @@ dislike_image = combined_image.crop((half_width, 0, img_width, img_height)).resi
 like_photo = ImageTk.PhotoImage(like_image)
 dislike_photo = ImageTk.PhotoImage(dislike_image)
 
-like_logo_label = tk.Label(logo_frame, image=like_photo, bg="#00008B")
+like_logo_label = tk.Label(voting_frame, image=like_photo, bg="#00008B")
 like_logo_label.grid(row=0, column=0, padx=20)
-dislike_logo_label = tk.Label(logo_frame, image=dislike_photo, bg="#00008B")
+dislike_logo_label = tk.Label(voting_frame, image=dislike_photo, bg="#00008B")
 dislike_logo_label.grid(row=0, column=1, padx=20)
 
 like_logo_label.bind("<Button-1>", like_clicked)
 dislike_logo_label.bind("<Button-1>", dislike_clicked)
 
-like_counter_label = tk.Label(logo_frame, text=f"Likes: {like_count}", font=("Helvetica", 20, "bold"), fg="white", bg="#00008B")
+like_counter_label = tk.Label(voting_frame, text=f"Likes: {like_count}", font=("Helvetica", 20, "bold"), fg="white", bg="#00008B")
 like_counter_label.grid(row=1, column=0, pady=5)
-dislike_counter_label = tk.Label(logo_frame, text=f"Dislikes: {dislike_count}", font=("Helvetica", 20, "bold"), fg="white", bg="#00008B")
+dislike_counter_label = tk.Label(voting_frame, text=f"Dislikes: {dislike_count}", font=("Helvetica", 20, "bold"), fg="white", bg="#00008B")
 dislike_counter_label.grid(row=1, column=1, pady=5)
 
-vote_message_label = tk.Label(root, text="", font=("Helvetica", 24, "bold"), fg="white", bg="#00008B")
-vote_message_label.pack(pady=10)
-
-cooldown_label = tk.Label(root, text="", font=("Helvetica", 20, "bold"), fg="yellow", bg="#00008B")
+# Create the vote message label and the cooldown label; these will be placed between the voting frame and the live camera feed.
+vote_message_label = tk.Label(camera_frame, text="", font=("Helvetica", 24, "bold"), fg="white", bg="#00008B")
+vote_message_label.pack(pady=5)
+cooldown_label = tk.Label(camera_frame, text="", font=("Helvetica", 20, "bold"), fg="yellow", bg="#00008B")
 cooldown_label.pack(pady=5)
 
-label_img = tk.Label(root, bg="#00008B")
+# Create the camera display label (live feed) below the vote and cooldown messages.
+label_img = tk.Label(camera_frame, bg="#00008B")
 label_img.pack(pady=10)
 
 # --------------------------- Video Capture ---------------------------
@@ -285,3 +323,4 @@ update_cooldown_timer()
 
 root.mainloop()
 cap.release()
+
